@@ -46,9 +46,11 @@ object Books {
   class Backend($: BackendScope[Unit, State]) {
     private val barcodeInput: Simple[html.Input] = Ref[html.Input]
 
-    val handleSubmit: (Barcode, Title) => CallbackTo[Unit] = (barcode, title) =>
-      $.modState(State.appendNewBook(barcode, title),
-        barcodeInput.foreach(_.focus()))
+    val handleSubmit: Book => CallbackTo[Unit] = {
+      case Book(barcode, title) =>
+        $.modState(State.appendNewBook(barcode, title),
+          barcodeInput.foreach(_.focus()))
+    }
 
     def render(state: State) =
       <.div(

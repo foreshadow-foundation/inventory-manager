@@ -1,19 +1,24 @@
 package foreshadow.inventory.components
 
+import cats.data._
+import cats.effect._
 import cats.implicits._
-import japgolly.scalajs.react.CatsReact._
+import foreshadow.cats.effect._
+import foreshadow.inventory.core.models._
+import hammock.{InterpTrans, _}
+import hammock.circe.implicits._
+import hammock.marshalling._
 import japgolly.scalajs.react.Ref.Simple
 import japgolly.scalajs.react._
 import japgolly.scalajs.react.component.Scala.{BackendScope => _}
 import japgolly.scalajs.react.vdom.html_<^._
 import monocle.macros.Lenses
 import org.scalajs.dom.html
-import foreshadow.inventory.core.models._
 
-import scala.concurrent.duration._
+import scala.concurrent.ExecutionContext
 
 object NewBookForm {
-  case class Props(addBookToTable: (Barcode, Title) => CallbackTo[Unit],
+  case class Props(addBookToTable: Book => CallbackTo[Unit],
                    barcodeInput: Simple[html.Input],
                   )
 
@@ -28,24 +33,47 @@ object NewBookForm {
     def handleSubmitTitle(e: ReactEventFromInput): Callback = {
       val updateState: Props => PartialFunction[StateMachine, Callback] = props => {
         case TitleEntry(barcode, titleHolder) =>
-          resetAndAddBook(barcode, tagTitle(titleHolder), props.addBookToTable)
+          resetAndAddBook(Book(barcode, tagTitle(titleHolder)), Kleisli(props.addBookToTable).mapF(_.asAsyncCallback))
       }
 
       e.preventDefaultCB >>
         ($.props product $.state) >>= Function.uncurried(updateState).tupled
     }
 
-    val remoteTitleLookup: Barcode => AsyncCallback[Option[Title]] = barcode =>
-      AsyncCallback.pure{
-        if (barcode == "asdf") Option("the title from the database").map(tagTitle)
-        else None
-      }.delay(500.millis)
+    implicit val asyncCallbackContextShift: ContextShift[AsyncCallback] = new ContextShift[AsyncCallback] {
+      override def shift: AsyncCallback[Unit] = AsyncCallback.unit
+      override def evalOn[A](ec: ExecutionContext)(fa: AsyncCallback[A]): AsyncCallback[A] = fa
+    }
+    implicit val interpreter: InterpTrans[AsyncCallback] = hammock.js.Interpreter.instance[AsyncCallback]
+
+    val postNewBook: Kleisli[AsyncCallback, Book, Unit] = Kleisli { book =>
+      Callback(println(s"sending $book")).asAsyncCallback >>
+      Hammock.request(Method.POST, uri"http://localhost:23456/api/known-barcodes", Map.empty, Option(book))
+        .as[None.type]
+        .exec[AsyncCallback]
+        .attempt
+        .void
+    }
+
+    val remoteTitleLookup: Barcode => AsyncCallback[Option[Title]] = barcode => {
+      Hammock.request(Method.GET, uri"http://localhost:23456/api/known-barcodes" / barcode, Map.empty)
+        .as[String]
+        .exec[AsyncCallback]
+        .attemptT
+        .map(Option(_).map(tagTitle))
+        .leftSemiflatMap { t =>
+          Callback {
+            t.printStackTrace()
+          }.asAsyncCallback
+        }
+        .getOrElse(None)
+    }
 
     val titleLookup: Barcode => Callback =
       remoteTitleLookup(_).flatMap { maybeTitle =>
         def updateStateFromLookupResult(props: Props): PartialFunction[(StateMachine, Option[Title]), Callback] = {
           case (TitleLookup(barcode), Some(title)) =>
-            resetAndAddBook(barcode, title, props.addBookToTable)
+            resetAndAddBook(Book(barcode, title), Kleisli(props.addBookToTable).mapF(_.asAsyncCallback))
           case (TitleLookup(barcode), None) =>
             $.setState(TitleEntry(barcode))
         }
@@ -88,8 +116,11 @@ object NewBookForm {
       $.modState(setTitleEntry)
     }
 
-    def resetAndAddBook(barcode: Barcode, title: Title, addBookToTable: (Barcode, Title) => CallbackTo[Unit]): Callback =
-      addBookToTable(barcode, title) >> $.setState(initialState)
+    def resetAndAddBook(book: Book, addBookToTable: Kleisli[AsyncCallback, Book, Unit]): Callback =
+      for {
+        _ <- List(postNewBook, addBookToTable).parTraverse_(_.run(book)).toCallback
+        _ <- $.setState(initialState)
+      } yield ()
 
     def render(props: Props, state: StateMachine): VdomElement = state match {
       case BarcodeEntry(barcodeHolder) =>

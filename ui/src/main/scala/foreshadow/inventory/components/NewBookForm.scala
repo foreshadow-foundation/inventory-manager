@@ -1,21 +1,20 @@
-package foreshadow.inventory.components
+package foreshadow.inventory
+package components
 
 import cats.data._
-import cats.effect._
 import cats.implicits._
-import foreshadow.cats.effect._
-import foreshadow.inventory.core.models._
-import hammock.{InterpTrans, _}
+import foreshadow.inventory.core.model._
+import hammock._
 import hammock.circe.implicits._
 import hammock.marshalling._
 import japgolly.scalajs.react.Ref.Simple
 import japgolly.scalajs.react._
 import japgolly.scalajs.react.component.Scala.{BackendScope => _}
+import japgolly.scalajs.react.effects.AsyncCallbackEffects._
+import japgolly.scalajs.react.effects.CallbackToEffects._
 import japgolly.scalajs.react.vdom.html_<^._
 import monocle.macros.Lenses
 import org.scalajs.dom.html
-
-import scala.concurrent.ExecutionContext
 
 object NewBookForm {
   case class Props(addBookToTable: Book => CallbackTo[Unit],
@@ -40,15 +39,9 @@ object NewBookForm {
         ($.props product $.state) >>= Function.uncurried(updateState).tupled
     }
 
-    implicit val asyncCallbackContextShift: ContextShift[AsyncCallback] = new ContextShift[AsyncCallback] {
-      override def shift: AsyncCallback[Unit] = AsyncCallback.unit
-      override def evalOn[A](ec: ExecutionContext)(fa: AsyncCallback[A]): AsyncCallback[A] = fa
-    }
-    implicit val interpreter: InterpTrans[AsyncCallback] = hammock.js.Interpreter.instance[AsyncCallback]
-
     val postNewBook: Kleisli[AsyncCallback, Book, Unit] = Kleisli { book =>
       Callback(println(s"sending $book")).asAsyncCallback >>
-      Hammock.request(Method.POST, uri"http://localhost:23456/api/known-barcodes", Map.empty, Option(book))
+      Hammock.request(Method.POST, serverBaseUri / "api" / "known-barcodes", Map.empty, Option(book))
         .as[None.type]
         .exec[AsyncCallback]
         .attempt
@@ -56,7 +49,7 @@ object NewBookForm {
     }
 
     val remoteTitleLookup: Barcode => AsyncCallback[Option[Title]] = barcode => {
-      Hammock.request(Method.GET, uri"http://localhost:23456/api/known-barcodes" / barcode, Map.empty)
+      Hammock.request(Method.GET, serverBaseUri / "api" / "known-barcodes" / barcode, Map.empty)
         .as[String]
         .exec[AsyncCallback]
         .attemptT

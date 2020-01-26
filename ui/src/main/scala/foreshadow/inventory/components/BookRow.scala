@@ -3,7 +3,7 @@ package foreshadow.inventory.components
 import japgolly.scalajs.react.component.Scala.{BackendScope => _, _}
 import japgolly.scalajs.react.vdom.html_<^._
 import japgolly.scalajs.react.{CtorType, _}
-import foreshadow.inventory.core.models._
+import foreshadow.inventory.core.model._
 
 object BookRow {
   case class Book(barcode: Barcode, title: Option[Title])

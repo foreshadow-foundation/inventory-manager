@@ -1,13 +1,15 @@
 val v = new {
   val scala = "2.12.10"
   val scalaJSDom = "0.9.8"
-  val scalaJSReact = "1.5.0"
+  val scalaJSReact = "1.6.0-SNAPSHOT"
   val scalaCss = "0.6.0"
   val reactJS = "16.12.0"
   val hammock = "0.10.0"
   val http4s = "0.21.0-M6"
   val gsheets4s = "0.2.0+60-e87d4ff3-SNAPSHOT" //"0.2.0"
   val log4j2 = "2.13.0"
+  val catsTagless = "0.11"
+  val circe = "0.12.1"
 }
 
 lazy val commonSettings = Seq(
@@ -45,8 +47,9 @@ lazy val core = sbtcrossproject.CrossPlugin.autoImport.crossProject(JVMPlatform,
   .settings(
     libraryDependencies ++= Seq(
       "com.chuusai" %%% "shapeless" % "2.3.3",
-      "io.circe" %%% "circe-core" % "0.12.1",
-      "io.circe" %%% "circe-generic" % "0.12.1",
+      "io.circe" %%% "circe-core" % v.circe,
+      "io.circe" %%% "circe-generic" % v.circe,
+      "io.circe" %%% "circe-literal" % v.circe,
     ),
   )
 
@@ -62,6 +65,7 @@ lazy val ui = (project in file("ui"))
       "com.github.japgolly.scalajs-react" %%% "core" % v.scalaJSReact,
       "com.github.japgolly.scalajs-react" %%% "extra" % v.scalaJSReact,
       "com.github.japgolly.scalajs-react" %%% "ext-cats" % v.scalaJSReact,
+      "com.github.japgolly.scalajs-react" %%% "ext-cats-effect" % v.scalaJSReact,
       "com.github.japgolly.scalajs-react" %%% "ext-monocle-cats" % v.scalaJSReact,
       "com.github.japgolly.scalacss" %%% "core" % v.scalaCss,
       "com.github.japgolly.scalacss" %%% "ext-react" % v.scalaCss,
@@ -108,10 +112,15 @@ lazy val backend = (project in file("backend"))
         "org.http4s" %% "http4s-blaze-server" % v.http4s,
         "org.http4s" %% "http4s-circe" % v.http4s,
         "org.http4s" %% "http4s-dsl" % v.http4s,
+        "org.http4s" %% "http4s-client" % v.http4s,
+        "org.http4s" %% "http4s-blaze-client" % v.http4s,
         "com.github.benfradet" %% "gsheets4s" % v.gsheets4s,
         "org.apache.logging.log4j" % "log4j-core" % v.log4j2,
         "org.apache.logging.log4j" % "log4j-slf4j-impl" % v.log4j2,
         "org.slf4j" % "jul-to-slf4j" % "1.7.30",
+        "org.typelevel" %% "cats-tagless-core" % v.catsTagless,
+        "org.typelevel" %% "cats-tagless-macros" % v.catsTagless,
+        "org.scalatest" %% "scalatest" % "3.1.0" % Test,
       )
     },
   )

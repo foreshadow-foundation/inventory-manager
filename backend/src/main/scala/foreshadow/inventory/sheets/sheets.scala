@@ -4,25 +4,23 @@ import cats.data._
 import cats.effect._
 import cats.effect.concurrent.Ref
 import cats.implicits._
-import eu.timepit.refined.auto._
-import foreshadow.inventory.core.models._
+import foreshadow.inventory.core.model._
 import gsheets4s.GSheets4s
 import gsheets4s.model._
 
-trait GSheetsService[F[_]] {
+trait InventoryService[F[_]] {
   def get: F[Map[Barcode, Title]]
   def append(book: Book): F[Unit]
 }
 
-class GSheetsServiceImpl[F[_]: Sync](credentials: Ref[F, Credentials]) extends GSheetsService[F] {
-  private val spreadsheetID = "1dHXvZjfomTxkx-gce-StFapzhu5acFRYAALybDtCzDs"
+class GSheetsInventoryServiceImpl[F[_]: Sync](credentials: Ref[F, Credentials],
+                                              spreadsheetId: String,
+                                              inventoryTable: A1Notation,
+                                             ) extends InventoryService[F] {
   private val gsheets = GSheets4s[F](credentials).spreadsheetsValues
-  private val inventoryTable: A1Notation =
-//    a1"""Sheet1!A1:B1"""
-    RangeNotation(Range(ColRowPosition("A", 1), ColRowPosition("B", 2000)))
 
   def get: F[Map[Barcode, Title]] = {
-    EitherT(gsheets.get(spreadsheetID, inventoryTable))
+    EitherT(gsheets.get(spreadsheetId, inventoryTable))
       .leftMap(GsheetsException(_))
       .map {
         case ValueRange(_, _, values) => values.collect {
@@ -33,17 +31,22 @@ class GSheetsServiceImpl[F[_]: Sync](credentials: Ref[F, Credentials]) extends G
   }
 
   def append(book: Book): F[Unit] =
-    EitherT(gsheets.append(spreadsheetID, inventoryTable, List(List(book.barcode, book.title))))
+    EitherT(gsheets.append(spreadsheetId, inventoryTable, List(List(book.barcode, book.title))))
       .leftMap(GsheetsException(_))
       .rethrowT
       .void
 
 }
 
-object GSheetsService {
-  def apply[F[_]: Sync](credentials: Credentials): Resource[F, GSheetsService[F]] =
+object GSheetsInventoryService {
+  def apply[F[_]: Sync](credentials: Credentials,
+                        spreadsheetId: String,
+                        inventoryTable: A1Notation,
+                       ): Resource[F, InventoryService[F]] =
     Resource.liftF(Ref.of[F, Credentials](credentials)
-      .map(ref => new GSheetsServiceImpl[F](ref)))
+      .map(ref => new GSheetsInventoryServiceImpl[F](ref, spreadsheetId, inventoryTable)))
+
+
 }
 
 case class GsheetsException(code: Int,

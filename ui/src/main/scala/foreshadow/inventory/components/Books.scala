@@ -9,7 +9,7 @@ import org.scalajs.dom.html
 import scalacss.DevDefaults._
 import scalacss.ScalaCssReact._
 import cats.implicits._
-import foreshadow.inventory.core.models._
+import foreshadow.inventory.core.model._
 
 object Books {
 

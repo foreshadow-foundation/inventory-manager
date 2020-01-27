@@ -15,5 +15,5 @@ package object inventory {
   }
   implicit val interpreter: InterpTrans[AsyncCallback] = hammock.js.Interpreter.instance[AsyncCallback]
 
-  val serverBaseUri = uri"http://johnston.cryingtreeofmercury.com:23456"
+  val serverBaseUri = uri"https://johnston.cryingtreeofmercury.com"
 }

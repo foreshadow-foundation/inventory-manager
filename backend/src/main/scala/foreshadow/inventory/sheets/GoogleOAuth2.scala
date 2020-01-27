@@ -1,4 +1,5 @@
-package foreshadow.inventory.sheets
+package foreshadow.inventory
+package sheets
 
 import cats._
 import cats.effect._
@@ -75,7 +76,7 @@ private[sheets] class GoogleOAuth2Impl[F[_] : Sync](client: Client[F]) extends G
         code = code,
         clientId = webappGoogleOauthClientId,
         clientSecret = Config.webappGoogleOauthClientSecret,
-        redirectUri = uri"http://johnston.cryingtreeofmercury.com:23456/index.html",
+        redirectUri = baseAppUri,
         AuthorizationCode,
       ).toUrlForm, uri"https://oauth2.googleapis.com/token")
       resp <- client.expect[GoogleOAuthTokenResponse](req)

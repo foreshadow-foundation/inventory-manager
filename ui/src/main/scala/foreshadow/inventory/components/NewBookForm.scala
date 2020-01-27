@@ -3,13 +3,13 @@ package components
 
 import java.util.Base64
 
-import cats.Applicative
 import cats.data._
 import cats.implicits._
 import foreshadow.inventory.core.model._
 import hammock._
 import hammock.circe.implicits._
 import hammock.marshalling._
+import io.circe.syntax._
 import japgolly.scalajs.react.Ref.Simple
 import japgolly.scalajs.react._
 import japgolly.scalajs.react.component.Scala.{BackendScope => _}
@@ -17,9 +17,10 @@ import japgolly.scalajs.react.effects.AsyncCallbackEffects._
 import japgolly.scalajs.react.effects.CallbackToEffects._
 import japgolly.scalajs.react.vdom.html_<^._
 import monocle.macros.Lenses
-import org.scalajs.dom.html
-import io.circe.syntax._
 import org.scalajs.dom.ext.AjaxException
+import org.scalajs.dom.html
+
+import scala.scalajs.js
 
 object NewBookForm {
   case class Props(addBookToTable: Book => CallbackTo[Unit],
@@ -73,9 +74,9 @@ object NewBookForm {
         .leftSemiflatMap {
           case t@AjaxException(xhr) if xhr.status != 404 =>
             Callback {
-              org.scalajs.dom.window.console.error(t)
+              org.scalajs.dom.window.console.error(js.JavaScriptException(t))
             }.asAsyncCallback
-          case _ => Applicative[AsyncCallback].unit
+          case _ => ().pure[AsyncCallback]
         }
         .getOrElse(None)
     }
@@ -84,7 +85,7 @@ object NewBookForm {
       remoteTitleLookup(_, _).flatMap { maybeTitle =>
         def updateStateFromLookupResult(props: Props): PartialFunction[(StateMachine, Option[Title]), Callback] = {
           case (TitleLookup(barcode, tokens), Some(title)) =>
-            resetAndAddBook(Book(barcode, title), tokens, Kleisli(props.addBookToTable).mapF(_.asAsyncCallback))
+            props.addBookToTable(Book(barcode, title)) >> setInitialState(tokens)
           case (TitleLookup(barcode, tokens), None) =>
             $.setState(TitleEntry(barcode, tokens = tokens), titleEntryInput.foreach(_.focus()))
         }
@@ -128,7 +129,7 @@ object NewBookForm {
     }
 
     def setInitialState(tokens: GoogleOAuthTokens): Callback =
-      $.setState(BarcodeEntry(tokens = tokens))
+      $.setState(BarcodeEntry(tokens = tokens)) >> $.props >>= (_.barcodeInput.foreach(_.focus()))
 
     def resetAndAddBook(book: Book, tokens: GoogleOAuthTokens, addBookToTable: Kleisli[AsyncCallback, Book, Unit]): Callback =
       for {

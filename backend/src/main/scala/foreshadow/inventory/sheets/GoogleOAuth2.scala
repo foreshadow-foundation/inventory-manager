@@ -69,13 +69,14 @@ object GoogleOAuth2 {
     Resource.pure[F, GoogleOAuth2[F]](new GoogleOAuth2Impl[F](Logger(logHeaders = true, logBody = true)(client)))
 }
 
-private[sheets] class GoogleOAuth2Impl[F[_] : Sync](client: Client[F]) extends GoogleOAuth2[F] with Http4sClientDsl[F] {
+private[sheets] class GoogleOAuth2Impl[F[_] : Sync : Config](client: Client[F]) extends GoogleOAuth2[F] with Http4sClientDsl[F] {
   override def exchangeAuthorizationCodeForTokens(code: GoogleAuthorizationCode): F[(GoogleAccessToken, GoogleRefreshToken)] =
     for {
+      clientSecret <- Config[F].webappGoogleOauthClientSecret
       req <- POST(GoogleOAuthTokenExchange(
         code = code,
         clientId = webappGoogleOauthClientId,
-        clientSecret = Config.webappGoogleOauthClientSecret,
+        clientSecret = clientSecret,
         redirectUri = baseAppUri,
         AuthorizationCode,
       ).toUrlForm, uri"https://oauth2.googleapis.com/token")

@@ -39,19 +39,19 @@ object ForeshadowInventoryApi {
 case object MissingAuthorizationHeader extends RuntimeException("Missing Authorization header", null, true, false)
 case object InvalidAuthorizationHeader extends RuntimeException("Invalid Authorization header", null, true, false)
 
-class ForeshadowInventoryApi[F[_] : Sync](googleOAuth2: GoogleOAuth2[F]) extends Http4sDsl[F] {
+class ForeshadowInventoryApi[F[_] : Sync : Config](googleOAuth2: GoogleOAuth2[F]) extends Http4sDsl[F] {
   private implicit def circeDecoder[T: Decoder]: EntityDecoder[F, T] = jsonOf[F, T]
 
   val authTokensFromRequest: Kleisli[OptionT[F, *], Request[F], GoogleOAuthTokens] =
     Kleisli { req =>
-      val maybeHeaderT = req.headers.get(Authorization)
       EitherT.fromEither[F] {
         for {
-          header <- maybeHeaderT.toRight(MissingAuthorizationHeader).flatMap {
+          header <- req.headers.get(Authorization).toRight(MissingAuthorizationHeader)
+          encodedToken <- header match {
             case Authorization(Credentials.Token(_, t)) => Right(t)
             case _ => Left(InvalidAuthorizationHeader)
           }
-          decoded <- Try(new String(Base64.getDecoder.decode(header), "UTF-8")).toEither
+          decoded <- Try(new String(Base64.getDecoder.decode(encodedToken), "UTF-8")).toEither
           json <- parse(decoded)
           tokens <- json.as[GoogleOAuthTokens]
         } yield tokens
@@ -65,7 +65,8 @@ class ForeshadowInventoryApi[F[_] : Sync](googleOAuth2: GoogleOAuth2[F]) extends
   def authenticatedRoutes: AuthedRoutes[GoogleOAuthTokens, F] = AuthedRoutes.of[GoogleOAuthTokens, F] {
     case GET -> Root / "api" / "known-barcodes" / barcode as GoogleOAuthTokens(accessToken, refreshToken) =>
       for {
-        credRef <- Ref.of[F, GCreds](GCreds(accessToken, refreshToken, webappGoogleOauthClientId, Config.webappGoogleOauthClientSecret))
+        clientSecret <- Config[F].webappGoogleOauthClientSecret
+        credRef <- Ref.of[F, GCreds](GCreds(accessToken, refreshToken, webappGoogleOauthClientId, clientSecret))
         inventory <- InventoryService[Kleisli[F, Ref[F, GCreds], *]].get(spreadsheetID, inventoryTable).run(credRef)
         GCreds(accessToken, _, _, _) <- credRef.get
         resp <- inventory.get(tagBarcode(barcode)).fold(NotFound(s"could not find $barcode", Header("X-Access-Token", accessToken)))(t => Ok(t.asJson, Header("X-Access-Token", accessToken)))
@@ -73,7 +74,8 @@ class ForeshadowInventoryApi[F[_] : Sync](googleOAuth2: GoogleOAuth2[F]) extends
 
     case (req@POST -> Root / "api" / "known-barcodes") as GoogleOAuthTokens(accessToken, refreshToken) =>
       for {
-        credRef <- Ref.of[F, GCreds](GCreds(accessToken, refreshToken, webappGoogleOauthClientId, Config.webappGoogleOauthClientSecret))
+        clientSecret <- Config[F].webappGoogleOauthClientSecret
+        credRef <- Ref.of[F, GCreds](GCreds(accessToken, refreshToken, webappGoogleOauthClientId, clientSecret))
         input <- req.as[Book]
         _ <- Sync[F].delay(println(s"trying to add $input"))
         _ <- InventoryService[Kleisli[F, Ref[F, GCreds], *]].append(spreadsheetID, inventoryTableHeader)(input).run(credRef)

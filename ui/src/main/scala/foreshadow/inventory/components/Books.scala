@@ -43,16 +43,17 @@ object Books {
       .map(BookRow.Book.tupled)
   )
 
-  class Backend($: BackendScope[Unit, State]) {
+  class Backend($: BackendScope[GoogleOAuthTokens, State]) {
     private val barcodeInput: Simple[html.Input] = Ref[html.Input]
+
+    val focusOnBarcodeEntry: Callback = barcodeInput.foreach(_.focus())
 
     val handleSubmit: Book => CallbackTo[Unit] = {
       case Book(barcode, title) =>
-        $.modState(State.appendNewBook(barcode, title),
-          barcodeInput.foreach(_.focus()))
+        $.modState(State.appendNewBook(barcode, title), focusOnBarcodeEntry)
     }
 
-    def render(state: State) =
+    def render(tokens: GoogleOAuthTokens, state: State) =
       <.div(
         <.table(Style.table,
           <.thead(
@@ -65,15 +66,16 @@ object Books {
             state.items.map(BookRow.apply): _*
           ),
         ),
-        NewBookForm(NewBookForm.Props(handleSubmit, barcodeInput)),
+        NewBookForm(NewBookForm.Props(handleSubmit, barcodeInput, tokens)),
       )
   }
 
-  val component: Component[Unit, State, Backend, CtorType.Nullary] =
-    ScalaComponent.builder[Unit]("Books")
-      .initialState(initialState)
-      .renderBackend[Backend]
-      .build
+  val component: Component[GoogleOAuthTokens, State, Backend, CtorType.Props] = ScalaComponent
+    .builder[GoogleOAuthTokens]("Books")
+    .initialState(initialState)
+    .renderBackend[Backend]
+    .componentDidMount(_.backend.focusOnBarcodeEntry)
+    .build
 
-  def apply(): Unmounted[Unit, State, Backend] = component()
+  def apply(accessToken: GoogleAccessToken, refreshToken: GoogleRefreshToken): VdomElement = component(GoogleOAuthTokens(accessToken, refreshToken))
 }

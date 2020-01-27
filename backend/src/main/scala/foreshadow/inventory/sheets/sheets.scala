@@ -4,23 +4,44 @@ import cats.data._
 import cats.effect._
 import cats.effect.concurrent.Ref
 import cats.implicits._
+import cats.tagless._
 import foreshadow.inventory.core.model._
 import gsheets4s.GSheets4s
 import gsheets4s.model._
 
+@finalAlg
+@autoInstrument
+@autoFunctorK
 trait InventoryService[F[_]] {
-  def get: F[Map[Barcode, Title]]
-  def append(book: Book): F[Unit]
+  def get(spreadsheetId: SpreadsheetId, table: A1Notation): F[Map[Barcode, Title]]
+  def append(spreadsheetId: SpreadsheetId, table: A1Notation)(book: Book): F[Unit]
+}
+
+object InventoryService {
+  val spreadsheetID: SpreadsheetId = tagSpreadsheetId("1dHXvZjfomTxkx-gce-StFapzhu5acFRYAALybDtCzDs")
+  val inventoryTable: A1Notation = a1"""Sheet1!A1:B2000"""
+  val inventoryTableHeader: A1Notation = a1"""Sheet1!A1:B1"""
+
+  implicit def GSheetsInventoryServiceInstance[F[_] : Sync]: InventoryService[Kleisli[F, Ref[F, Credentials], *]] = {
+    // TODO use mapK to remove the duplicated Kleisli logic
+    new InventoryService[Kleisli[F, Ref[F, Credentials], *]] {
+      override def get(spreadsheetId: SpreadsheetId, table: A1Notation): Kleisli[F, Ref[F, Credentials], Map[Barcode, Title]] = Kleisli {
+        GSheetsInventoryService[F](_).get(spreadsheetId, table)
+      }
+
+      override def append(spreadsheetId: SpreadsheetId, table: A1Notation)(book: Book): Kleisli[F, Ref[F, Credentials], Unit] = Kleisli {
+        GSheetsInventoryService[F](_).append(spreadsheetId, table)(book)
+      }
+    }
+  }
 }
 
 class GSheetsInventoryServiceImpl[F[_]: Sync](credentials: Ref[F, Credentials],
-                                              spreadsheetId: String,
-                                              inventoryTable: A1Notation,
                                              ) extends InventoryService[F] {
   private val gsheets = GSheets4s[F](credentials).spreadsheetsValues
 
-  def get: F[Map[Barcode, Title]] = {
-    EitherT(gsheets.get(spreadsheetId, inventoryTable))
+  def get(spreadsheetId: SpreadsheetId, table: A1Notation): F[Map[Barcode, Title]] = {
+    EitherT(gsheets.get(spreadsheetId, table))
       .leftMap(GsheetsException(_))
       .map {
         case ValueRange(_, _, values) => values.collect {
@@ -30,8 +51,8 @@ class GSheetsInventoryServiceImpl[F[_]: Sync](credentials: Ref[F, Credentials],
       .rethrowT
   }
 
-  def append(book: Book): F[Unit] =
-    EitherT(gsheets.append(spreadsheetId, inventoryTable, List(List(book.barcode, book.title))))
+  def append(spreadsheetId: SpreadsheetId, table: A1Notation)(book: Book): F[Unit] =
+    EitherT(gsheets.append(spreadsheetId, table, List(List(book.barcode, book.title))))
       .leftMap(GsheetsException(_))
       .rethrowT
       .void
@@ -39,14 +60,9 @@ class GSheetsInventoryServiceImpl[F[_]: Sync](credentials: Ref[F, Credentials],
 }
 
 object GSheetsInventoryService {
-  def apply[F[_]: Sync](credentials: Credentials,
-                        spreadsheetId: String,
-                        inventoryTable: A1Notation,
-                       ): Resource[F, InventoryService[F]] =
-    Resource.liftF(Ref.of[F, Credentials](credentials)
-      .map(ref => new GSheetsInventoryServiceImpl[F](ref, spreadsheetId, inventoryTable)))
-
-
+  def apply[F[_]: Sync](credentials: Ref[F, Credentials],
+                       ): InventoryService[F] =
+      new GSheetsInventoryServiceImpl[F](credentials)
 }
 
 case class GsheetsException(code: Int,

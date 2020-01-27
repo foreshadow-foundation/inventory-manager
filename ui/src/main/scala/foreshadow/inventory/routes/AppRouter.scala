@@ -17,7 +17,7 @@ object AppRouter {
   val config = RouterConfigDsl[AppPage].buildConfig { dsl =>
     import dsl._
 
-    (dynamicRouteCT((root ~ queryToMap).caseClass[QueryParamPage]) ~> dynRenderR((p, r) => HomePage(r, p.queryParams.get("code").map(tagGoogleAuthorizationCode)))
+    (dynamicRouteCT((root ~ queryToMap).caseClass[QueryParamPage]) ~> dynRender(p => HomePage(p.queryParams.get("code").map(tagGoogleAuthorizationCode)))
       )
       .notFound(redirectToPage(Home)(SetRouteVia.HistoryReplace))
       .renderWith(layout)
@@ -35,5 +35,5 @@ object AppRouter {
 
   val baseUrl = BaseUrl.fromWindowOrigin / "index.html"
 
-  val router = Router(baseUrl, config)
+  val router = Router(baseUrl, config.logToConsole)
 }

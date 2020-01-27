@@ -50,6 +50,7 @@ lazy val core = sbtcrossproject.CrossPlugin.autoImport.crossProject(JVMPlatform,
       "io.circe" %%% "circe-core" % v.circe,
       "io.circe" %%% "circe-generic" % v.circe,
       "io.circe" %%% "circe-literal" % v.circe,
+      "org.scalatest" %%% "scalatest" % "3.1.0" % Test,
     ),
   )
 

@@ -62,9 +62,9 @@ package model {
     implicit def googleAuthorizationCodeExchangeRequestCodec: Codec[GoogleAuthorizationCodeExchangeRequest] = deriveCodec
   }
 
-  case class GoogleOAuthTokensResponse(accessToken: GoogleAccessToken, refreshToken: GoogleRefreshToken)
-  object GoogleOAuthTokensResponse {
-    implicit def googleOAuthTokensResponseCodec: Codec[GoogleOAuthTokensResponse] = deriveCodec
+  case class GoogleOAuthTokens(accessToken: GoogleAccessToken, refreshToken: GoogleRefreshToken)
+  object GoogleOAuthTokens {
+    implicit def googleOAuthTokensResponseCodec: Codec[GoogleOAuthTokens] = deriveCodec
   }
 
   object Book {

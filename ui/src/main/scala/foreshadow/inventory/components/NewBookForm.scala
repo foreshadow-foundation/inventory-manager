@@ -1,6 +1,9 @@
 package foreshadow.inventory
 package components
 
+import java.util.Base64
+
+import cats.Applicative
 import cats.data._
 import cats.implicits._
 import foreshadow.inventory.core.model._
@@ -15,60 +18,75 @@ import japgolly.scalajs.react.effects.CallbackToEffects._
 import japgolly.scalajs.react.vdom.html_<^._
 import monocle.macros.Lenses
 import org.scalajs.dom.html
+import io.circe.syntax._
+import org.scalajs.dom.ext.AjaxException
 
 object NewBookForm {
   case class Props(addBookToTable: Book => CallbackTo[Unit],
                    barcodeInput: Simple[html.Input],
+                   tokens: GoogleOAuthTokens,
                   )
 
-  sealed trait StateMachine
-  case class BarcodeEntry(barcodeHolder: String = "") extends StateMachine
-  case class TitleLookup(barcode: Barcode) extends StateMachine
-  @Lenses case class TitleEntry(barcode: Barcode, titleHolder: String = "") extends StateMachine
+  sealed trait StateMachine {
+    val tokens: GoogleOAuthTokens
+  }
+  @Lenses case class BarcodeEntry(barcodeHolder: String = "", tokens: GoogleOAuthTokens) extends StateMachine
+  case class TitleLookup(barcode: Barcode, tokens: GoogleOAuthTokens) extends StateMachine
+  @Lenses case class TitleEntry(barcode: Barcode, titleHolder: String = "", tokens: GoogleOAuthTokens) extends StateMachine
 
-  val initialState: StateMachine = BarcodeEntry()
+  val initialState: Props => StateMachine = p => BarcodeEntry(tokens = p.tokens)
+
+  val authorizationHeaderFromTokens: GoogleOAuthTokens => String = tokens => s"Bearer ${Base64.getEncoder.encodeToString(tokens.asJson.noSpaces.getBytes("UTF-8"))}"
 
   class Backend($: BackendScope[Props, StateMachine]) {
+    private val titleEntryInput: Simple[html.Input] = Ref[html.Input]
+
     def handleSubmitTitle(e: ReactEventFromInput): Callback = {
       val updateState: Props => PartialFunction[StateMachine, Callback] = props => {
-        case TitleEntry(barcode, titleHolder) =>
-          resetAndAddBook(Book(barcode, tagTitle(titleHolder)), Kleisli(props.addBookToTable).mapF(_.asAsyncCallback))
+        case TitleEntry(barcode, titleHolder, tokens) =>
+          resetAndAddBook(Book(barcode, tagTitle(titleHolder)), tokens, Kleisli(props.addBookToTable).mapF(_.asAsyncCallback))
       }
 
       e.preventDefaultCB >>
         ($.props product $.state) >>= Function.uncurried(updateState).tupled
     }
 
-    val postNewBook: Kleisli[AsyncCallback, Book, Unit] = Kleisli { book =>
-      Callback(println(s"sending $book")).asAsyncCallback >>
-      Hammock.request(Method.POST, serverBaseUri / "api" / "known-barcodes", Map.empty, Option(book))
-        .as[None.type]
-        .exec[AsyncCallback]
-        .attempt
-        .void
+    val postNewBook: Kleisli[AsyncCallback, (Book, GoogleOAuthTokens), Unit] = Kleisli { case (book, tokens) =>
+      Callback(println(s"sending $book")).asAsyncCallback >> {
+        val authHeader: (String, String) = "Authorization" -> authorizationHeaderFromTokens(tokens)
+        val headers = Map(authHeader)
+
+        Hammock.request(Method.POST, serverBaseUri / "api" / "known-barcodes", headers, Option(book))
+          .as[None.type]
+          .exec[AsyncCallback]
+          .attempt
+          .void
+      }
     }
 
-    val remoteTitleLookup: Barcode => AsyncCallback[Option[Title]] = barcode => {
-      Hammock.request(Method.GET, serverBaseUri / "api" / "known-barcodes" / barcode, Map.empty)
+    val remoteTitleLookup: (Barcode, GoogleOAuthTokens) => AsyncCallback[Option[Title]] = (barcode, tokens) => {
+      Hammock.request(Method.GET, serverBaseUri / "api" / "known-barcodes" / barcode, Map("Authorization" -> authorizationHeaderFromTokens(tokens)))
         .as[String]
         .exec[AsyncCallback]
         .attemptT
         .map(Option(_).map(tagTitle))
-        .leftSemiflatMap { t =>
-          Callback {
-            t.printStackTrace()
-          }.asAsyncCallback
+        .leftSemiflatMap {
+          case t@AjaxException(xhr) if xhr.status != 404 =>
+            Callback {
+              org.scalajs.dom.window.console.error(t)
+            }.asAsyncCallback
+          case _ => Applicative[AsyncCallback].unit
         }
         .getOrElse(None)
     }
 
-    val titleLookup: Barcode => Callback =
-      remoteTitleLookup(_).flatMap { maybeTitle =>
+    val titleLookup: (Barcode, GoogleOAuthTokens) => Callback =
+      remoteTitleLookup(_, _).flatMap { maybeTitle =>
         def updateStateFromLookupResult(props: Props): PartialFunction[(StateMachine, Option[Title]), Callback] = {
-          case (TitleLookup(barcode), Some(title)) =>
-            resetAndAddBook(Book(barcode, title), Kleisli(props.addBookToTable).mapF(_.asAsyncCallback))
-          case (TitleLookup(barcode), None) =>
-            $.setState(TitleEntry(barcode))
+          case (TitleLookup(barcode, tokens), Some(title)) =>
+            resetAndAddBook(Book(barcode, title), tokens, Kleisli(props.addBookToTable).mapF(_.asAsyncCallback))
+          case (TitleLookup(barcode, tokens), None) =>
+            $.setState(TitleEntry(barcode, tokens = tokens), titleEntryInput.foreach(_.focus()))
         }
 
         (for {
@@ -80,21 +98,21 @@ object NewBookForm {
 
     def handleSubmitBarcode(e: ReactEventFromInput): Callback = {
       val barcodeEntryToTitleLookup: PartialFunction[StateMachine, StateMachine] = {
-        case BarcodeEntry(b) => TitleLookup(tagBarcode(b))
+        case BarcodeEntry(b, tokens) => TitleLookup(tagBarcode(b), tokens)
       }
 
-      val getBarcode: PartialFunction[StateMachine, Barcode] = {
-        case BarcodeEntry(barcodeHolder) => tagBarcode(barcodeHolder)
+      val getBarcode: PartialFunction[StateMachine, (Barcode, GoogleOAuthTokens)] = {
+        case BarcodeEntry(barcodeHolder, tokens) => (tagBarcode(barcodeHolder), tokens)
       }
 
       e.preventDefaultCB >>
-        $.modState(barcodeEntryToTitleLookup) >> $.state.map(getBarcode) >>= titleLookup
+        $.modState(barcodeEntryToTitleLookup) >> $.state.map(getBarcode) >>= titleLookup.tupled
     }
 
     def handleNewBarcodeOnChange(e: ReactEventFromInput): CallbackTo[Unit] = {
       val value = e.target.value
       val setBarcodeEntry: PartialFunction[StateMachine, StateMachine] = {
-        case BarcodeEntry(_) => BarcodeEntry(value)
+        case b: BarcodeEntry => BarcodeEntry.barcodeHolder.set(value)(b)
       }
 
       $.modState(setBarcodeEntry)
@@ -109,14 +127,17 @@ object NewBookForm {
       $.modState(setTitleEntry)
     }
 
-    def resetAndAddBook(book: Book, addBookToTable: Kleisli[AsyncCallback, Book, Unit]): Callback =
+    def setInitialState(tokens: GoogleOAuthTokens): Callback =
+      $.setState(BarcodeEntry(tokens = tokens))
+
+    def resetAndAddBook(book: Book, tokens: GoogleOAuthTokens, addBookToTable: Kleisli[AsyncCallback, Book, Unit]): Callback =
       for {
-        _ <- List(postNewBook, addBookToTable).parTraverse_(_.run(book)).toCallback
-        _ <- $.setState(initialState)
+        _ <- List(postNewBook, addBookToTable.local[(Book, GoogleOAuthTokens)](_._1)).parTraverse_(_.run((book, tokens))).toCallback
+        _ <- setInitialState(tokens)
       } yield ()
 
     def render(props: Props, state: StateMachine): VdomElement = state match {
-      case BarcodeEntry(barcodeHolder) =>
+      case BarcodeEntry(barcodeHolder, _) =>
         <.form(^.onSubmit ==> handleSubmitBarcode,
           <.label("Barcode:",
             <.input.text(
@@ -125,23 +146,29 @@ object NewBookForm {
             ).withRef(props.barcodeInput),
           ),
         )
-      case TitleLookup(barcode) =>
+      case TitleLookup(barcode, _) =>
         <.div(s"Checking title for $barcode…")
-      case TitleEntry(barcode, titleHolder) =>
-        <.form(^.onSubmit ==> handleSubmitTitle,
-          <.label(s"Title for $barcode:",
-            <.input.text(
-              ^.onChange ==> handleTitleOnChange,
-              ^.value := titleHolder,
+      case TitleEntry(barcode, titleHolder, _) =>
+        <.div(
+          <.form(^.onSubmit ==> handleSubmitTitle,
+            <.label(s"Title for $barcode:",
+              <.input.text(
+                ^.onChange ==> handleTitleOnChange,
+                ^.value := titleHolder,
+              ).withRef(titleEntryInput),
             ),
           ),
+          // TODO the input field doesn't focus after clicking on this button
+          <.button(^.onClick ==> (_ => setInitialState(state.tokens)),
+            "Cancel"
+          )
         )
     }
   }
 
   val component = ScalaComponent
     .builder[Props]("NewBookForm")
-    .initialState(initialState)
+    .initialStateFromProps(initialState)
     .renderBackend[Backend]
     .build
 

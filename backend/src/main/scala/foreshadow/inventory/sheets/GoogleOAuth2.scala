@@ -74,7 +74,7 @@ private[sheets] class GoogleOAuth2Impl[F[_] : Sync](client: Client[F]) extends G
       req <- POST(GoogleOAuthTokenExchange(
         code = code,
         clientId = webappGoogleOauthClientId,
-        clientSecret = webappGoogleOauthClientSecret,
+        clientSecret = Config.webappGoogleOauthClientSecret,
         redirectUri = uri"http://johnston.cryingtreeofmercury.com:23456/index.html",
         AuthorizationCode,
       ).toUrlForm, uri"https://oauth2.googleapis.com/token")
